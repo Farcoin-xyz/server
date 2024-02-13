@@ -40,7 +40,7 @@ const app = express();
 
 const directives = helmet.contentSecurityPolicy.getDefaultDirectives();
 directives['default-src'] = ["*"];
-directives['script-src'] = ["*"];
+directives['script-src'] = ["*", "'unsafe-inline'"]; // Unsafe-inline is for MetaMask
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
