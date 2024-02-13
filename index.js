@@ -38,11 +38,15 @@ redisClient.connect();
 
 const app = express();
 
+const directives = helmet.contentSecurityPolicy.getDefaultDirectives();
+directives['default-src'] = ["*"];
+directives['script-src'] = ["*"];
+
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
-    directives: helmet.contentSecurityPolicy.getDefaultDirectives()
-  }
+    directives,
+  },
 }));
 
 app.use(cors({
@@ -51,20 +55,20 @@ app.use(cors({
     'http://localhost:3030',
     'https://farcoin.xyz',
   ],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 }));
 
 app.use(cookieParser());
 app.use(expressSession({
   secret: process.env.REDIS_SECRET,
   store: new RedisStore({
-    client: redisClient
+    client: redisClient,
   }),
   cookie: {
     maxAge: 2147483647
   },
   saveUninitialized: false,
-  resave: false
+  resave: false,
 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -102,11 +106,11 @@ app.post('/session/start', async (req, res) => {
       throw new Error('Invalid signature');
     }
     req.session.user = {
-      address
+      address,
     };
     delete req.session.code;
     sendResponse(res, null, {
-      user: req.session.user
+      user: req.session.user,
     });
   } catch (e) {
     sendResponse(res, e);
@@ -208,7 +212,7 @@ app.get('/sign', async (req, res) => {
             reactionBody: {
               targetCastId: {
                 fid,
-              }
+              },
             },
           } = messages[i].data;
           const t = timestamp + frcEpoch;
