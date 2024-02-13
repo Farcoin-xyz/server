@@ -86,6 +86,10 @@ const sendResponse = (res, error, results) => {
   }
 };
 
+app.get('/status', async (req, res) => {
+  sendResponse(res, null, { status: 'Running' });
+});
+
 app.post('/session/start', async (req, res) => {
   const { address, signature } = req.body;
   const { code } = req.session;
