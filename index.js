@@ -323,14 +323,15 @@ app.get('/metadata/image/:fid', async (req, res) => {
   }
 });
 
-app.get('/metadata/:fid', async (req, res) => {
+app.get('/metadata/:fid.json', async (req, res) => {
   const { fid } = req.params;
   try {
-    const { result: { user } } = await client.lookupUserByFid(fid);
+    const fidTruncated = fid.replace(/^0+/, '');
+    const { result: { user } } = await client.lookupUserByFid(fidTruncated);
     res.status(200).setHeader('Content-Type', 'application/json').send({
       title: user.username,
       external_url: `https://warpcast.com/${user.username}`,
-      image: `https://farcoin.xyz/metadata/image/${fid}`,
+      image: `https://farcoin.xyz/metadata/image/${fidTruncated}`,
     });
   } catch (e) {
     res.status(404).send('Farcaster User Not Found: '+ fid);
