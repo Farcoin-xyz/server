@@ -296,7 +296,7 @@ app.get('/metadata/image/:fid.svg', async (req, res) => {
   const { fid } = req.params;
   try {
     const { result: { user } } = await client.lookupUserByFid(fid);
-    const image = user.pfp && user.pfp.url;
+    const image = user.pfp && user.pfp.url ? user.pfp.url : 'https://avatars.githubusercontent.com/u/159229088?s=200&v=4';
     res.status(200).setHeader('Content-Type', 'image/svg+xml').send(
 `<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="#f0f0f0" />
@@ -318,17 +318,18 @@ app.get('/metadata/image/:fid.svg', async (req, res) => {
 });
 
 app.get('/metadata/:fid.json', async (req, res) => {
-  const { fid } = req.params;
+  const { fid: fidHex } = req.params;
   try {
-    const fidTruncated = fid.replace(/^0+/, '');
-    const { result: { user } } = await client.lookupUserByFid(fidTruncated);
+    const fid = parseInt(fidHex.replace(/^0+/, ''), 16);
+    const { result: { user } } = await client.lookupUserByFid(fid);
     res.status(200).setHeader('Content-Type', 'application/json').send({
       name: user.username,
       external_url: `https://warpcast.com/${user.username}`,
-      image: `https://farcoin.xyz/metadata/image/${fidTruncated}.svg`,
+      image: user.pfp && user.pfp.url ? user.pfp.url : 'https://avatars.githubusercontent.com/u/159229088?s=200&v=4',
+      animation_url: `https://farcoin.xyz/metadata/image/${fid}.svg`,
     });
   } catch (e) {
-    res.status(404).send('Farcaster User Not Found: '+ fid);
+    res.status(404).send('Farcaster User Not Found: '+ fidHex);
   }
 });
 
