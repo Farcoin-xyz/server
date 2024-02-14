@@ -25,7 +25,7 @@ const frcSigner = ethers.Wallet.fromPhrase(process.env.FARCOIN_SIGNER);
 const provider = new ethers.JsonRpcProvider('https://base.publicnode.com', undefined, {
   staticNetwork: true,
 });
-const contract = new ethers.Contract('0x69ac278f393f4daa698e685909b3aedbf95c1c49', frcAbi, provider);
+const contract = new ethers.Contract('0xEcB5DF8f302706bC0a8F383904b67663b886a9e1', frcAbi, provider);
 
 const redisClient = createClient({
   socket: {
@@ -289,50 +289,6 @@ app.get('/scan', async (req, res) => {
     sendResponse(res, null, result);
   } catch (e) {
     sendResponse(res, e);
-  }
-});
-
-app.get('/metadata/image/:fid.svg', async (req, res) => {
-  const { fid } = req.params;
-  try {
-    const { result: { user } } = await client.lookupUserByFid(fid);
-    const image = 'https://avatars.githubusercontent.com/u/159228504?v=4';
-    res.status(200).setHeader('Content-Type', 'image/svg+xml').send(
-`<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
-  <rect width="100%" height="100%" fill="#f0f0f0" />
-  <defs>
-    <clipPath id="circleClip">
-      <circle cx="200" cy="200" r="100" />
-    </clipPath>
-  </defs>
-  <circle cx="200" cy="200" r="100" fill="none" stroke="#800080" stroke-width="20" />
-  <image href="${image.replaceAll('&', '&amp;')}"
-    x="100" y="100"
-    width="200" height="200"
-    clip-path="url(#circleClip)" />
-</svg>`
-    );
-  } catch (e) {
-    res.status(404).send('Farcaster User Not Found: '+ fid);
-  }
-});
-
-app.get('/metadata/:fid.json', async (req, res) => {
-  const { fid: fidHex } = req.params;
-  try {
-    const fid = (fidHex || '').startsWith('0')
-      ? parseInt(fidHex.replace(/^0+/, ''), 16)  // Opensea 
-      : parseInt(fidHex.replace(/^0+/, ''), 10); // NFTScan
-
-    const { result: { user } } = await client.lookupUserByFid(fid);
-    res.status(200).setHeader('Content-Type', 'application/json').send({
-      name: user.username,
-      external_url: `https://warpcast.com/${user.username}`,
-      image: 'https://avatars.githubusercontent.com/u/159228504?v=4',
-      animation_url: `https://farcoin.xyz/metadata/image/${fid}.svg`,
-    });
-  } catch (e) {
-    res.status(404).send('Farcaster User Not Found: '+ fidHex);
   }
 });
 
