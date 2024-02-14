@@ -167,7 +167,7 @@ const getReactionsToUser = async (fid, maxResults, result, nextCursor, depth) =>
   if (!next.cursor || cutoff || depth == 4) {
     return;
   }
-  await getReactionsToUser(fid, result, next.cursor, depth + 1);
+  await getReactionsToUser(fid, maxResults, result, next.cursor, depth + 1);
 };
 
 app.get('/sign', async (req, res) => {
