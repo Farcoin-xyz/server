@@ -41,6 +41,7 @@ const app = express();
 const directives = helmet.contentSecurityPolicy.getDefaultDirectives();
 directives['default-src'] = ["*"];
 directives['script-src'] = ["*", "'unsafe-inline'"]; // Unsafe-inline is for MetaMask
+directives['img-src'] = ["*"]; // For NFT Metadata
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
@@ -291,33 +292,26 @@ app.get('/scan', async (req, res) => {
   }
 });
 
-app.get('/metadata/image/:fid', async (req, res) => {
+app.get('/metadata/image/:fid.svg', async (req, res) => {
   const { fid } = req.params;
   try {
     const { result: { user } } = await client.lookupUserByFid(fid);
     const image = user.pfp && user.pfp.url;
-    res.status(200).setHeader('Content-Type', 'image/svg+xml').send(`
-<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
-  <!-- Rectangular background -->
+    res.status(200).setHeader('Content-Type', 'image/svg+xml').send(
+`<svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="#f0f0f0" />
-
-  <!-- Define clip path as a circle -->
   <defs>
     <clipPath id="circleClip">
       <circle cx="200" cy="200" r="100" />
     </clipPath>
   </defs>
-
-  <!-- Purple border circle -->
   <circle cx="200" cy="200" r="100" fill="none" stroke="#800080" stroke-width="20" />
-
-  <!-- Embedded image with clip path applied -->
   <image href="${image.replaceAll('&', '&amp;')}"
     x="100" y="100"
     width="200" height="200"
     clip-path="url(#circleClip)" />
-</svg>
-    `);
+</svg>`
+    );
   } catch (e) {
     res.status(404).send('Farcaster User Not Found: '+ fid);
   }
@@ -329,9 +323,9 @@ app.get('/metadata/:fid.json', async (req, res) => {
     const fidTruncated = fid.replace(/^0+/, '');
     const { result: { user } } = await client.lookupUserByFid(fidTruncated);
     res.status(200).setHeader('Content-Type', 'application/json').send({
-      title: user.username,
+      name: user.username,
       external_url: `https://warpcast.com/${user.username}`,
-      image: `https://farcoin.xyz/metadata/image/${fidTruncated}`,
+      image: `https://farcoin.xyz/metadata/image/${fidTruncated}.svg`,
     });
   } catch (e) {
     res.status(404).send('Farcaster User Not Found: '+ fid);
