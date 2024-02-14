@@ -320,7 +320,10 @@ app.get('/metadata/image/:fid.svg', async (req, res) => {
 app.get('/metadata/:fid.json', async (req, res) => {
   const { fid: fidHex } = req.params;
   try {
-    const fid = parseInt(fidHex.replace(/^0+/, ''), 16);
+    const fid = (fidHex || '').startsWith('0')
+      ? parseInt(fidHex.replace(/^0+/, ''), 16)  // Opensea 
+      : parseInt(fidHex.replace(/^0+/, ''), 10); // NFTScan
+
     const { result: { user } } = await client.lookupUserByFid(fid);
     res.status(200).setHeader('Content-Type', 'application/json').send({
       name: user.username,
