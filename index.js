@@ -180,7 +180,7 @@ app.get('/sign', async (req, res) => {
     const result = {
       mintArguments: [],
     };
-    const hubClient = getSSLHubRpcClient('nemes.farcaster.xyz:2283');
+    const hubClient = getSSLHubRpcClient(process.env.HUB_GRPC_URL);
     hubClient.$.waitForReady(Date.now() + 5000, async (e) => {
       if (e) {
         console.error(`Failed to connect to the gRPC server:`, e);
