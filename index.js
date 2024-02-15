@@ -187,66 +187,70 @@ app.get('/sign', async (req, res) => {
         sendResponse(res, new Error('Failed to connect to the gRPC server'));
         return;
       }
-      let startTime = null;
-      let endTime = null;
-      let numTokens = 0;
+      try {
+        let startTime = null;
+        let endTime = null;
+        let numTokens = 0;
 
-      let isNextPage = true;
-      let nextPageToken = undefined;
-      while (isNextPage) {
-        const reactions = await hubClient.getReactionsByFid({
-          fid: likerFid,
-          reactionType: ReactionType.LIKE,
-          pageToken: nextPageToken,
-        });
-        if (reactions.error) {
-          console.error(reactions.error);
-          sendResponse(res, new Error('Unable to fetch reactions'));
-          hubClient.close();
-          return;
-        }
-        const { messages } = reactions.value;
-        for (let i = 0; i < messages.length; i++) {
-          const {
-            type,
-            timestamp,
-            reactionBody: {
-              targetCastId: {
-                fid,
+        let isNextPage = true;
+        let nextPageToken = undefined;
+        while (isNextPage) {
+          const reactions = await hubClient.getReactionsByFid({
+            fid: likerFid,
+            reactionType: ReactionType.LIKE,
+            pageToken: nextPageToken,
+          });
+          if (reactions.error) {
+            console.error(reactions.error);
+            sendResponse(res, new Error('Unable to fetch reactions'));
+            hubClient.close();
+            return;
+          }
+          const { messages } = reactions.value;
+          for (let i = 0; i < messages.length; i++) {
+            const {
+              type,
+              timestamp,
+              reactionBody: {
+                targetCastId: {
+                  fid,
+                },
               },
-            },
-          } = messages[i].data;
-          const t = timestamp + frcEpoch;
-          if (t <= rangeClose) {
-            break;
-          }
-          if (fid === liked.fid) {
-            endTime = Math.max(endTime || 0, t);
-            startTime = Math.min(startTime || Infinity, t);
-            numTokens++;
-          }
-        };
-        nextPageToken = reactions.value.nextPageToken;
-        isNextPage = !!nextPageToken && nextPageToken.length > 0;
+            } = messages[i].data;
+            const t = timestamp + frcEpoch;
+            if (fid === liked.fid && t > rangeClose) {
+              endTime = Math.max(endTime || 0, t);
+              startTime = Math.min(startTime || Infinity, t);
+              numTokens++;
+            }
+          };
+          nextPageToken = reactions.value.nextPageToken;
+          isNextPage = !!nextPageToken && nextPageToken.length > 0;
+        }
+        hubClient.close();
+        if (numTokens === 0) {
+          throw new Error("No tokens to mint");
+        }
+        result.mintArguments = [
+          likedAddress,
+          liked.fid,
+          [likerFid],
+          [numTokens],
+          [startTime],
+          [endTime],
+        ];
+        const contractMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+          [ "address", "uint256", "uint256[]", "uint256[]", "uint256[]", "uint256[]" ],
+          result.mintArguments
+        );
+        const contractMsgHash = ethers.keccak256(contractMessage);
+        const contractSignature = await frcSigner.signMessage(ethers.getBytes(contractMsgHash));
+        result.mintArguments.push([contractSignature]);
+        sendResponse(res, null, result);
+      } catch (e) {
+        console.error(e)
+        sendResponse(res, e);
       }
-      hubClient.close();
-      
-      result.mintArguments = [
-        likedAddress,
-        liked.fid,
-        [likerFid],
-        [numTokens],
-        [startTime],
-        [endTime],
-      ];
-      const contractMessage = ethers.AbiCoder.defaultAbiCoder().encode(
-        [ "address", "uint256", "uint256[]", "uint256[]", "uint256[]", "uint256[]" ],
-        result.mintArguments
-      );
-      const contractMsgHash = ethers.keccak256(contractMessage);
-      const contractSignature = await frcSigner.signMessage(ethers.getBytes(contractMsgHash));
-      result.mintArguments.push([contractSignature]);
-      sendResponse(res, null, result);
     });
   } catch (e) {
     console.error(e)
