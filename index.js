@@ -215,18 +215,18 @@ app.get('/sign', async (req, res) => {
               type,
               timestamp,
               reactionBody: {
-                targetCastId: {
-                  fid,
-                },
+                targetCastId,
               },
             } = messages[i].data;
-            const t = timestamp + frcEpoch;
-            if (fid === liked.fid && t > rangeClose) {
-              endTime = Math.max(endTime || 0, t);
-              startTime = Math.min(startTime || Infinity, t);
-              numTokens++;
+            if (targetCastId) { // in some cases this can be null (e.g. `targetUrl` populated instead)
+              const t = timestamp + frcEpoch;
+              if (targetCastId.fid === liked.fid && t > rangeClose) {
+                endTime = Math.max(endTime || 0, t);
+                startTime = Math.min(startTime || Infinity, t);
+                numTokens++;
+              }
             }
-          };
+          }
           nextPageToken = reactions.value.nextPageToken;
           isNextPage = !!nextPageToken && nextPageToken.length > 0;
         }
