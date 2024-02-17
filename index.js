@@ -135,8 +135,8 @@ app.get('/session', async (req, res) => {
   sendResponse(res, null, { user });
 });
 
-const getReactionsToUser = async (fid, maxResults, result, nextCursor, depth) => {
-  const { result: { notifications, next } } = await client.fetchUserLikesAndRecasts(fid, {
+const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, depth) => {
+  const { result: { notifications, next } } = await client.fetchUserLikesAndRecasts(likedFid, {
     limit: 150,
     cursor: nextCursor
   });
@@ -148,14 +148,17 @@ const getReactionsToUser = async (fid, maxResults, result, nextCursor, depth) =>
       for (let j = 0; j < reactors.length; j++) {
         const { fid, username, timestamp } = reactors[j];
         if (!result.fidLikes[fid]) {
-          // First time seeing this name
+          // First time seeing this fid
           result.count++;
           result.fidNames[fid] = username;
           result.fidLikes[fid] = 1;
-          result.fidLastLikeTime[fid] = Math.floor(new Date(timestamp).getTime() / 1000);
         } else {
           result.fidLikes[fid]++;
         }
+        result.fidLastLikeTime[fid] = Math.max(
+          result.fidLastLikeTime[fid] || 0,
+          Math.floor(new Date(timestamp).getTime() / 1000),
+        );
 
         if (result.count >= maxResults) {
           cutoff = true;
@@ -167,7 +170,7 @@ const getReactionsToUser = async (fid, maxResults, result, nextCursor, depth) =>
   if (!next.cursor || cutoff || depth == 4) {
     return;
   }
-  await getReactionsToUser(fid, maxResults, result, next.cursor, depth + 1);
+  await getReactionsToUser(likedFid, maxResults, result, next.cursor, depth + 1);
 };
 
 app.get('/sign', async (req, res) => {
