@@ -16,12 +16,16 @@ const RedisStore = require('connect-redis').default;
 
 const { NeynarAPIClient } = require('@neynar/nodejs-sdk');
 const { getSSLHubRpcClient, ReactionType } = require('@farcaster/hub-nodejs');
+
+const axios = require('axios');
+
 const frcAbi = require('./frc-abi.json');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const client = new NeynarAPIClient(process.env.NEYNAR_KEY);
-const frcSigner = ethers.Wallet.fromPhrase(process.env.FARCOIN_SIGNER);
+const signerURLs = (process.env.SIGNER_URLS || '').split(' ');
+const signerTokens = (process.env.SIGNER_TOKENS || '').split(' ');
 const provider = new ethers.JsonRpcProvider('https://base.publicnode.com', undefined, {
   staticNetwork: true,
 });
@@ -173,87 +177,25 @@ const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, dept
   await getReactionsToUser(likedFid, maxResults, result, next.cursor, depth + 1);
 };
 
-app.get('/sign', async (req, res) => {
-  const frcEpoch = 1609459200;
+app.post('/sign', async (req, res) => {
   try {
-    const { likerFid } = req.query;
+    const { likerFid } = req.body;
     const { address: likedAddress } = req.session.user;
     const { result: { user: liked } } = await client.lookupUserByVerification(likedAddress);
-    const rangeClose = parseInt((await contract.getLikerLikedRangeClose(liked.fid, likerFid)).toString());
-    const result = {
-      mintArguments: [],
-    };
-    const hubClient = getSSLHubRpcClient(process.env.HUB_GRPC_URL);
-    hubClient.$.waitForReady(Date.now() + 5000, async (e) => {
-      if (e) {
-        console.error(`Failed to connect to the gRPC server:`, e);
-        sendResponse(res, new Error('Failed to connect to the gRPC server'));
-        return;
-      }
-      try {
-        let startTime = null;
-        let endTime = null;
-        let numTokens = 0;
-
-        let isNextPage = true;
-        let nextPageToken = undefined;
-        while (isNextPage) {
-          const reactions = await hubClient.getReactionsByFid({
-            fid: likerFid,
-            reactionType: ReactionType.LIKE,
-            pageToken: nextPageToken,
-          });
-          if (reactions.error) {
-            console.error(reactions.error);
-            sendResponse(res, new Error('Unable to fetch reactions'));
-            hubClient.close();
-            return;
-          }
-          const { messages } = reactions.value;
-          for (let i = 0; i < messages.length; i++) {
-            const {
-              type,
-              timestamp,
-              reactionBody: {
-                targetCastId,
-              },
-            } = messages[i].data;
-            if (targetCastId) { // in some cases this can be null (e.g. `targetUrl` populated instead)
-              const t = timestamp + frcEpoch;
-              if (targetCastId.fid === liked.fid && t > rangeClose) {
-                endTime = Math.max(endTime || 0, t);
-                startTime = Math.min(startTime || Infinity, t);
-                numTokens++;
-              }
-            }
-          }
-          nextPageToken = reactions.value.nextPageToken;
-          isNextPage = !!nextPageToken && nextPageToken.length > 0;
-        }
-        hubClient.close();
-        if (numTokens === 0) {
-          throw new Error("No tokens to mint");
-        }
-        result.mintArguments = [
-          likedAddress,
-          liked.fid,
-          [likerFid],
-          [numTokens],
-          [startTime],
-          [endTime],
-        ];
-        const contractMessage = ethers.AbiCoder.defaultAbiCoder().encode(
-          [ "address", "uint256", "uint256[]", "uint256[]", "uint256[]", "uint256[]" ],
-          result.mintArguments
-        );
-        const contractMsgHash = ethers.keccak256(contractMessage);
-        const contractSignature = await frcSigner.signMessage(ethers.getBytes(contractMsgHash));
-        result.mintArguments.push([contractSignature]);
-        sendResponse(res, null, result);
-      } catch (e) {
-        console.error(e)
-        sendResponse(res, e);
-      }
+    const likedFid = liked.fid;
+    const results = await Promise.all(signerURLs.map(async (url, i) => {
+      const response = await axios.post(url, {
+        likerFid,
+        likedFid,
+        likedAddress,
+      }, {
+        headers: { Authorization: `Bearer ${signerTokens[i]}` }
+      });
+      return response.data.result;
+    }));
+    const signatures = results.map(r => r.signature);
+    sendResponse(res, null, {
+      mintArguments: results[0].arguments.concat([signatures]),
     });
   } catch (e) {
     console.error(e)
