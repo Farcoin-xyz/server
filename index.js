@@ -19,7 +19,7 @@ const { getSSLHubRpcClient, ReactionType } = require('@farcaster/hub-nodejs');
 
 const axios = require('axios');
 
-const frcAbi = require('./frc-abi.json');
+const minterAbi = require('./minter-abi.json');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 
@@ -29,7 +29,7 @@ const signerTokens = (process.env.SIGNER_TOKENS || '').split(' ');
 const provider = new ethers.JsonRpcProvider('https://base.publicnode.com', undefined, {
   staticNetwork: true,
 });
-const contract = new ethers.Contract('0xEcB5DF8f302706bC0a8F383904b67663b886a9e1', frcAbi, provider);
+const minter = new ethers.Contract('0x523c42baE73eE4c9669A51f2916222DefbA9020B', minterAbi, provider);
 
 const redisClient = createClient({
   socket: {
@@ -45,7 +45,7 @@ const app = express();
 const directives = helmet.contentSecurityPolicy.getDefaultDirectives();
 directives['default-src'] = ["*"];
 directives['script-src'] = ["*", "'unsafe-inline'"]; // Unsafe-inline is for MetaMask
-directives['img-src'] = ["*"]; // For NFT Metadata
+directives['img-src'] = ["*"];
 
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
@@ -177,14 +177,14 @@ const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, dept
   await getReactionsToUser(likedFid, maxResults, result, next.cursor, depth + 1);
 };
 
-app.post('/sign', async (req, res) => {
+app.post('/mint', async (req, res) => {
   try {
     const { likerFid } = req.body;
     const { address: likedAddress } = req.session.user;
     const { result: { user: liked } } = await client.lookupUserByVerification(likedAddress);
     const likedFid = liked.fid;
     const results = await Promise.all(signerURLs.map(async (url, i) => {
-      const response = await axios.post(url, {
+      const response = await axios.post(`${url}/mint`, {
         likerFid,
         likedFid,
         likedAddress,
@@ -229,8 +229,10 @@ app.get('/scan', async (req, res) => {
       // Newest to oldest
       return result.fidLastLikeTime[fidA] > result.fidLastLikeTime[fidB] ? -1 : 1
     });
-
-    const lastMintTimes = (await contract.getLikersLikedRangeClose(user.fid, result.FIDs)).map(n => parseInt(n.toString()));
+    const userFIDRepeated = Array.from({ length: result.count }, () => user.fid);
+    const lastMintTimes = (
+      await minter.getLastLikeTimes(userFIDRepeated, result.FIDs)
+    ).map(n => Number(n));
     lastMintTimes.forEach((t, i) => {
       result.fidLastMintTime[result.FIDs[i]] = t;
     });
