@@ -331,7 +331,7 @@ app.get('/scan', async (req, res) => {
     });
     const userFIDRepeated = Array.from({ length: result.count }, () => user.fid);
     const lastMintTimes = (
-      await minter.getLastLikeTimes(userFIDRepeated, result.FIDs)
+      await minter.getLastLikeTimes(result.FIDs, userFIDRepeated)
     ).map(n => Number(n));
     lastMintTimes.forEach((t, i) => {
       result.fidLastMintTime[result.FIDs[i]] = t;
