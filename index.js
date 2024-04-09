@@ -13,11 +13,13 @@ const bodyParser = require('body-parser');
 
 const createClient = require('redis').createClient;
 const RedisStore = require('connect-redis').default;
+const mysql = require('mysql2/promise');
 
 const { NeynarAPIClient } = require('@neynar/nodejs-sdk');
 const { getSSLHubRpcClient, ReactionType } = require('@farcaster/hub-nodejs');
 
 const axios = require('axios');
+const cron = require('node-schedule');
 
 const minterAbi = require('./minter-abi.json');
 
@@ -29,7 +31,7 @@ const signerTokens = (process.env.SIGNER_TOKENS || '').split(' ');
 const provider = new ethers.JsonRpcProvider('https://base.publicnode.com', undefined, {
   staticNetwork: true,
 });
-const minter = new ethers.Contract('0x523c42baE73eE4c9669A51f2916222DefbA9020B', minterAbi, provider);
+const minter = new ethers.Contract('0x9d5CE03b73a2291f5E62597E6f27A91CA9129d97', minterAbi, provider);
 
 const redisClient = createClient({
   socket: {
@@ -39,6 +41,96 @@ const redisClient = createClient({
   password: process.env.REDIS_PASSWORD,
 });
 redisClient.connect();
+
+const db = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+});
+
+cron.scheduleJob('*/30 * * * * *', async () => {
+  try {
+    const [row] = await db.query('SELECT last_block_number FROM log_scan WHERE log_type = ?', ['mint']);
+
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock = 12401773; // row[0].max_block || 12319075; // Block minter was deployed
+    const toBlock = Math.min(fromBlock + 120, latestBlock - 5);
+
+    const mintLogs = await minter.queryFilter('Mint', fromBlock, toBlock);
+    const mintData = [];
+    let mintQuery = '';
+    mintLogs.forEach(l => {
+      mintQuery += ',(?,?,?,?,?,?,?,?,?,?)';
+      mintData.push(
+        Number(l.args.likerFID),
+        Number(l.args.likedFID),
+        l.args.liker,
+        l.args.liked,
+        Number(l.args.quantity),
+        Number(l.args.firstLikeTime),
+        Number(l.args.lastLikeTime),
+        Number(l.args.timestamp),
+        l.blockNumber,
+        l.transactionHash,
+      );
+    });
+    if (mintData.length > 0) {
+      await db.query(`INSERT INTO mint (
+        liker_fid,
+        liked_fid,
+        liker_address,
+        liked_address,
+        quantity_likes,
+        first_like_time,
+        last_like_time,
+        block_timestamp,
+        block_number,
+        transaction_hash
+      ) VALUES ${mintQuery.slice(1)} ON DUPLICATE KEY UPDATE id=id`, mintData);
+    }
+    await db.query('INSERT INTO log_scan (log_type, last_block_number) VALUES (?,?) ON DUPLICATE KEY UPDATE last_block_number=VALUES(last_block_number)', ['mint', toBlock]);
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+cron.scheduleJob('*/30 * * * * *', async () => {
+  try {
+    const [row] = await db.query('SELECT last_block_number FROM log_scan WHERE log_type = ?', ['claim']);
+
+    const claimLogs = await minter.queryFilter('Claim', fromBlock, toBlock);
+    const claimData = [];
+    let claimQuery = '';
+    claimLogs.forEach(l => {
+      claimQuery += ',(?,?,?,?,?,?,?)';
+      claimData.push(
+        Number(l.args.likerFID),
+        l.args.liker,
+        Number(l.args.nonce),
+        ethers.formatEther(l.args.tokens),
+        Number(l.args.timestamp),
+        l.blockNumber,
+        l.transactionHash,
+      );
+    });
+    if (claimData.length > 0) {
+      await db.query(`INSERT INTO claim (
+        liker_fid,
+        liker_address,
+        nonce,
+        quantity_tokens,
+        block_timestamp,
+        block_number,
+        transaction_hash
+      ) VALUES ${claimQuery.slice(1)} ON DUPLICATE KEY UPDATE id=id`, claimData);
+    }
+    await db.query('INSERT INTO log_scan (log_type, last_block_number) VALUES (?,?) ON DUPLICATE KEY UPDATE last_block_number=VALUES(last_block_number)', ['mint', toBlock]);
+  } catch (e) {
+    console.error(e);
+  }
+});
 
 const app = express();
 
@@ -138,6 +230,10 @@ app.get('/session', async (req, res) => {
   const user = req.session.user || {};
   sendResponse(res, null, { user });
 });
+
+// client.fetchBulkUsers([2, 3], { viewerFid: 1 }).then(response => {
+//   console.log('Bulk Users Information:', response.users.map(r => [r.fid, r.username]));
+// });
 
 const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, depth) => {
   const { result: { notifications, next } } = await client.fetchUserLikesAndRecasts(likedFid, {
