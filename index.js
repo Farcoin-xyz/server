@@ -130,7 +130,7 @@ cron.scheduleJob('*/30 * * * * *', async () => {
         transaction_hash
       ) VALUES ${claimQuery.slice(1)} ON DUPLICATE KEY UPDATE id=id`, claimData);
     }
-    await db.query('INSERT INTO log_scan (log_type, last_block_number) VALUES (?,?) ON DUPLICATE KEY UPDATE last_block_number=VALUES(last_block_number)', ['mint', toBlock]);
+    await db.query('INSERT INTO log_scan (log_type, last_block_number) VALUES (?,?) ON DUPLICATE KEY UPDATE last_block_number=VALUES(last_block_number)', ['claim', toBlock]);
   } catch (e) {
     console.error(e);
   }
