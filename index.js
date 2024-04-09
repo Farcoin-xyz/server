@@ -55,7 +55,7 @@ cron.scheduleJob('*/30 * * * * *', async () => {
     const [row] = await db.query('SELECT last_block_number FROM log_scan WHERE log_type = ?', ['mint']);
 
     const latestBlock = await provider.getBlockNumber();
-    const fromBlock = 12401773; // row[0].max_block || 12319075; // Block minter was deployed
+    const fromBlock = row.length > 0 ? row[0].last_block_number : 12919419;
     const toBlock = Math.min(fromBlock + 120, latestBlock - 5);
 
     const mintLogs = await minter.queryFilter('Mint', fromBlock, toBlock);
@@ -99,6 +99,10 @@ cron.scheduleJob('*/30 * * * * *', async () => {
 cron.scheduleJob('*/30 * * * * *', async () => {
   try {
     const [row] = await db.query('SELECT last_block_number FROM log_scan WHERE log_type = ?', ['claim']);
+
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock = row.length > 0 ? row[0].last_block_number : 12919419;
+    const toBlock = Math.min(fromBlock + 120, latestBlock - 5);
 
     const claimLogs = await minter.queryFilter('Claim', fromBlock, toBlock);
     const claimData = [];
