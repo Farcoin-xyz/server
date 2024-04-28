@@ -284,7 +284,7 @@ app.post('/mint', async (req, res) => {
     const { result: { user: liked } } = await client.lookupUserByVerification(likedAddress);
     const likedFid = liked.fid;
     const results = await Promise.all(signerURLs.map(async (url, i) => {
-      const response = await axios.post(`${url}/mint`, {
+      const response = await axios.post(`${url}/api/mint`, {
         likerFid,
         likedFid,
         likedAddress,
