@@ -300,6 +300,17 @@ app.get('/mint/recent', async (req, res) => {
   }
 });
 
+app.post('/lookup-user-by-fid', async (req, res) => {
+  try {
+    const query = req.body.query;
+    const { result: { user }} = await client.lookupUserByFid(query);
+    sendResponse(res, null, user);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
 app.post('/lookup-user', async (req, res) => {
   try {
     const query = req.body.query;
