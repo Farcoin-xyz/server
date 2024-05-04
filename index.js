@@ -28,7 +28,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const client = new NeynarAPIClient(process.env.NEYNAR_KEY);
 const signerURLs = (process.env.SIGNER_URLS || '').split(' ');
 const signerTokens = (process.env.SIGNER_TOKENS || '').split(' ');
-const provider = new ethers.JsonRpcProvider('https://base.publicnode.com', undefined, {
+const provider = new ethers.JsonRpcProvider('https://base-rpc.publicnode.com', undefined, {
   staticNetwork: true,
 });
 const minter = new ethers.Contract('0x9d5CE03b73a2291f5E62597E6f27A91CA9129d97', minterAbi, provider);
@@ -56,7 +56,7 @@ cron.scheduleJob('*/30 * * * * *', async () => {
 
     const latestBlock = await provider.getBlockNumber();
     const fromBlock = row.length > 0 ? row[0].last_block_number : 12919419;
-    const toBlock = Math.min(fromBlock + 120, latestBlock - 5);
+    const toBlock = Math.min(fromBlock + 1000, latestBlock - 2);
 
     const mintLogs = await minter.queryFilter('Mint', fromBlock, toBlock);
     const mintData = [];
@@ -102,7 +102,7 @@ cron.scheduleJob('*/30 * * * * *', async () => {
 
     const latestBlock = await provider.getBlockNumber();
     const fromBlock = row.length > 0 ? row[0].last_block_number : 12919419;
-    const toBlock = Math.min(fromBlock + 120, latestBlock - 5);
+    const toBlock = Math.min(fromBlock + 1000, latestBlock - 2);
 
     const claimLogs = await minter.queryFilter('Claim', fromBlock, toBlock);
     const claimData = [];
@@ -235,9 +235,14 @@ app.get('/session', async (req, res) => {
   sendResponse(res, null, { user });
 });
 
-// client.fetchBulkUsers([2, 3], { viewerFid: 1 }).then(response => {
-//   console.log('Bulk Users Information:', response.users.map(r => [r.fid, r.username]));
-// });
+const getFIDNames = async (FIDs) => {
+  const fidNames = {};
+  const r = await client.fetchBulkUsers(FIDs, { viewerFid: 1 });
+  r.users.forEach(user => {
+    fidNames[user.fid] = user.username;
+  });
+  return fidNames;
+}
 
 const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, depth) => {
   const { result: { notifications, next } } = await client.fetchUserLikesAndRecasts(likedFid, {
@@ -277,10 +282,38 @@ const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, dept
   await getReactionsToUser(likedFid, maxResults, result, next.cursor, depth + 1);
 };
 
+app.get('/mint/recent', async (req, res) => {
+  try {
+    const [recentMints] = await db.query('SELECT * FROM mint ORDER BY id DESC LIMIT 20');
+    const fids = {};
+    recentMints.forEach(m => {
+      fids[m.liker_fid] = true;
+      fids[m.liked_fid] = true;
+    });
+    const fidNames = await getFIDNames(Object.keys(fids));
+    sendResponse(res, null, {
+      recentMints,
+      fidNames,
+    });
+  } catch (e) {
+    sendResponse(res, e);
+  }
+});
+
+app.post('/lookup-user', async (req, res) => {
+  try {
+    const query = req.body.query;
+    const { result: { user }} = await client.lookupUserByUsername(query);
+    sendResponse(res, null, user);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
 app.post('/mint', async (req, res) => {
   try {
-    const { likerFid } = req.body;
-    const { address: likedAddress } = req.session.user;
+    const { likerFid, likedAddress } = req.body;
     const { result: { user: liked } } = await client.lookupUserByVerification(likedAddress);
     const likedFid = liked.fid;
     const results = await Promise.all(signerURLs.map(async (url, i) => {
@@ -298,8 +331,7 @@ app.post('/mint', async (req, res) => {
       mintArguments: results[0].arguments.concat([signatures]),
     });
   } catch (e) {
-    console.error(e)
-    sendResponse(res, e);
+    sendResponse(res, e && e.response && e.response.data ? JSON.stringify(e.response.data) : e);
   }
 });
 
@@ -339,7 +371,7 @@ app.get('/scan', async (req, res) => {
 
     sendResponse(res, null, result);
   } catch (e) {
-    sendResponse(res, e);
+    sendResponse(res, e && e.response && e.response.data && JSON.stringify(e.response.data) || e);
   }
 });
 
