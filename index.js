@@ -322,6 +322,17 @@ app.post('/lookup-user', async (req, res) => {
   }
 });
 
+app.post('/lookup-user-by-address', async (req, res) => {
+  try {
+    const query = req.body.query;
+    const { result: { user }} = await client.lookupUserByVerification(query);
+    sendResponse(res, null, user);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
 app.post('/mint', async (req, res) => {
   try {
     const { likerFid, likedAddress } = req.body;
