@@ -175,18 +175,18 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('build'));
 
-const sendResponse = (res, error, results) => {
+const sendResponse = (res, error, result) => {
   if (error) {
     res.status(500);
     res.set('content-type', 'application/json');
     res.send({
-      errors: [error.toString()]
+      error: error.message
     });
   } else {
     res.status(200);
     res.set('content-type', 'application/json');
     res.send(JSON.stringify({
-      results: results
+      result
     }));
   }
 };
@@ -244,45 +244,7 @@ const getFIDNames = async (FIDs) => {
   return fidNames;
 }
 
-const getReactionsToUser = async (likedFid, maxResults, result, nextCursor, depth) => {
-  const { result: { notifications, next } } = await client.fetchUserLikesAndRecasts(likedFid, {
-    limit: 150,
-    cursor: nextCursor
-  });
-
-  let cutoff = false;
-  for (let i = 0; i < notifications.length; i++) {
-    const { reactors, reactionType } = notifications[i];
-    if (reactionType === 'like') {
-      for (let j = 0; j < reactors.length; j++) {
-        const { fid, username, timestamp } = reactors[j];
-        if (!result.fidLikes[fid]) {
-          // First time seeing this fid
-          result.count++;
-          result.fidNames[fid] = username;
-          result.fidLikes[fid] = 1;
-        } else {
-          result.fidLikes[fid]++;
-        }
-        result.fidLastLikeTime[fid] = Math.max(
-          result.fidLastLikeTime[fid] || 0,
-          Math.floor(new Date(timestamp).getTime() / 1000),
-        );
-
-        if (result.count >= maxResults) {
-          cutoff = true;
-          break;
-        }
-      }
-    }
-  };
-  if (!next.cursor || cutoff || depth == 4) {
-    return;
-  }
-  await getReactionsToUser(likedFid, maxResults, result, next.cursor, depth + 1);
-};
-
-app.get('/mint/recent', async (req, res) => {
+app.get('/recent-mints', async (req, res) => {
   try {
     const [recentMints] = await db.query('SELECT * FROM mint ORDER BY id DESC LIMIT 20');
     const fids = {};
@@ -300,10 +262,19 @@ app.get('/mint/recent', async (req, res) => {
   }
 });
 
-app.post('/lookup-user-by-fid', async (req, res) => {
+app.get('/search-users', async (req, res) => {
   try {
-    const query = req.body.query;
-    const { result: { user }} = await client.lookupUserByFid(query);
+    const { result: { users }} = await client.searchUser(req.query.username);
+    sendResponse(res, null, users);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
+app.get('/user-by-fid', async (req, res) => {
+  try {
+    const { result: { user }} = await client.lookupUserByFid(req.query.fid);
     sendResponse(res, null, user);
   } catch (e) {
     console.error(e)
@@ -311,10 +282,9 @@ app.post('/lookup-user-by-fid', async (req, res) => {
   }
 });
 
-app.post('/lookup-user', async (req, res) => {
+app.get('/user-by-username', async (req, res) => {
   try {
-    const query = req.body.query;
-    const { result: { user }} = await client.lookupUserByUsername(query);
+    const { result: { user }} = await client.lookupUserByUsername(req.query.username);
     sendResponse(res, null, user);
   } catch (e) {
     console.error(e)
@@ -322,11 +292,60 @@ app.post('/lookup-user', async (req, res) => {
   }
 });
 
-app.post('/lookup-user-by-address', async (req, res) => {
+app.get('/user-by-address', async (req, res) => {
   try {
-    const query = req.body.query;
-    const { result: { user }} = await client.lookupUserByVerification(query);
+    const { result: { user }} = await client.lookupUserByVerification(req.query.address);
     sendResponse(res, null, user);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
+app.get('/owned-by-fid', async (req, res) => {
+  try {
+    const [fidesOwned] = await db.query(
+      'SELECT liker_fid, SUM(quantity_likes) AS likes, MAX(block_timestamp) AS last_mint_time FROM mint WHERE liked_fid = ? GROUP BY liker_fid ORDER BY last_mint_time DESC',
+      [
+        req.query.fid
+      ]
+    );
+    if (fidesOwned.length > 0) {
+      const fids = {};
+      fidesOwned.forEach(m => {
+        fids[m.liker_fid] = true;
+      });
+      const fidNames = await getFIDNames(Object.keys(fids));
+      fidesOwned.forEach(m => {
+        m.name = fidNames[m.liker_fid];
+      });
+    }
+    sendResponse(res, null, fidesOwned);
+  } catch (e) {
+    console.error(e)
+    sendResponse(res, e);
+  }
+});
+
+app.get('/owners-by-fid', async (req, res) => {
+  try {
+    const [fideOwners] = await db.query(
+      'SELECT liked_fid, SUM(quantity_likes) AS likes, MAX(block_timestamp) AS last_mint_time FROM mint WHERE liker_fid = ? GROUP BY liked_fid ORDER BY likes DESC',
+      [
+        req.query.fid
+      ]
+    );
+    if (fideOwners.length > 0) {
+      const fids = {};
+      fideOwners.forEach(m => {
+        fids[m.liked_fid] = true;
+      });
+      const fidNames = await getFIDNames(Object.keys(fids));
+      fideOwners.forEach(m => {
+        m.name = fidNames[m.liked_fid];
+      });
+    }
+    sendResponse(res, null, fideOwners);
   } catch (e) {
     console.error(e)
     sendResponse(res, e);
@@ -334,10 +353,17 @@ app.post('/lookup-user-by-address', async (req, res) => {
 });
 
 app.post('/mint', async (req, res) => {
+  const { likerFid, likedAddress } = req.body;
+  let likedFid = null;
   try {
-    const { likerFid, likedAddress } = req.body;
     const { result: { user: liked } } = await client.lookupUserByVerification(likedAddress);
-    const likedFid = liked.fid;
+    likedFid = liked.fid;
+  } catch (e) {
+    console.error(likedAddress, e.response && e.response.data || e.message);
+    sendResponse(res, new Error('Connected wallet not linked to a Farcaster account'));
+    return;
+  }
+  try {
     const results = await Promise.all(signerURLs.map(async (url, i) => {
       const response = await axios.post(`${url}/api/mint`, {
         likerFid,
@@ -353,47 +379,11 @@ app.post('/mint', async (req, res) => {
       mintArguments: results[0].arguments.concat([signatures]),
     });
   } catch (e) {
-    sendResponse(res, e && e.response && e.response.data ? JSON.stringify(e.response.data) : e);
-  }
-});
-
-app.get('/scan', async (req, res) => {
-  try {
-    const { address } = req.query;
-    const { result: { user } } = await client.lookupUserByVerification(address);
-    if (!user) {
-      throw new Error('Farcaster User Not Found: '+ address);
+    if (e.response && e.response.data && e.response.data.error) {
+      sendResponse(res, new Error(e.response.data.error));
+    } else {
+      sendResponse(res, e);
     }
-    if (user.verifications.filter(v => v.toLowerCase() == (address || '').toLowerCase()).length === 0) {
-      throw new Error('Farcaster Address Verification Not Found For: '+ address);
-    }
-    const result = {
-      fidLastLikeTime: {},
-      fidLastMintTime: {},
-      fidLikes: {},
-      fidNames: {},
-      FIDs: [],
-      count: 0,
-    };
-
-    const maxResults = 1000;
-    await getReactionsToUser(user.fid, maxResults, result, null, 1);
-
-    result.FIDs = Object.keys(result.fidLikes).sort((fidA, fidB) => {
-      // Newest to oldest
-      return result.fidLastLikeTime[fidA] > result.fidLastLikeTime[fidB] ? -1 : 1
-    });
-    const userFIDRepeated = Array.from({ length: result.count }, () => user.fid);
-    const lastMintTimes = (
-      await minter.getLastLikeTimes(result.FIDs, userFIDRepeated)
-    ).map(n => Number(n));
-    lastMintTimes.forEach((t, i) => {
-      result.fidLastMintTime[result.FIDs[i]] = t;
-    });
-
-    sendResponse(res, null, result);
-  } catch (e) {
-    sendResponse(res, e && e.response && e.response.data && JSON.stringify(e.response.data) || e);
   }
 });
 
