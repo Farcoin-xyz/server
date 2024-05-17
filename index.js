@@ -136,6 +136,52 @@ cron.scheduleJob('*/30 * * * * *', async () => {
   }
 });
 
+cron.scheduleJob('*/30 * * * * *', async () => {
+  try {
+    const [row] = await db.query('SELECT last_block_number FROM log_scan WHERE log_type = ?', ['onboard']);
+
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock = row.length > 0 ? row[0].last_block_number : 14504479;
+    const toBlock = Math.min(fromBlock + 1000, latestBlock - 2);
+
+    const claimLogs = await minter.queryFilter('Onboard', fromBlock, toBlock);
+    const claimData = [];
+    let claimQuery = '';
+    claimLogs.forEach(l => {
+      claimQuery += ',(?,?,?,?,?,?,?)';
+      claimData.push(
+        Number(l.args.userNum),
+        Number(l.args.likerFID),
+        Number(l.args.likedFID),
+        ethers.formatEther(l.args.reward),
+        Number(l.args.timestamp),
+        l.blockNumber,
+        l.transactionHash,
+      );
+    });
+    if (claimData.length > 0) {
+      await db.query(`INSERT INTO onboard (
+        user_num,
+        liker_fid,
+        liked_fid,
+        reward_tokens,
+        block_timestamp,
+        block_number,
+        transaction_hash
+      ) VALUES ${claimQuery.slice(1)} ON DUPLICATE KEY UPDATE
+        liker_fid=VALUES(liker_fid),
+        liked_fid=VALUES(liked_fid),
+        reward_tokens=VALUES(reward_tokens),
+        block_timestamp=VALUES(block_timestamp),
+        block_number=VALUES(block_number),
+        transaction_hash=VALUES(transaction_hash)`, claimData);
+    }
+    await db.query('INSERT INTO log_scan (log_type, last_block_number) VALUES (?,?) ON DUPLICATE KEY UPDATE last_block_number=VALUES(last_block_number)', ['onboard', toBlock]);
+  } catch (e) {
+    console.error(e);
+  }
+});
+
 const app = express();
 
 const directives = helmet.contentSecurityPolicy.getDefaultDirectives();
@@ -292,16 +338,6 @@ app.get('/user-by-username', async (req, res) => {
   }
 });
 
-app.get('/user-by-address', async (req, res) => {
-  try {
-    const { result: { user }} = await client.lookupUserByVerification(req.query.address);
-    sendResponse(res, null, user);
-  } catch (e) {
-    console.error(e)
-    sendResponse(res, e);
-  }
-});
-
 app.get('/owned-by-fid', async (req, res) => {
   try {
     const [fidesOwned] = await db.query(
@@ -377,6 +413,31 @@ app.post('/mint', async (req, res) => {
     const signatures = results.map(r => r.signature);
     sendResponse(res, null, {
       mintArguments: results[0].arguments.concat([signatures]),
+    });
+  } catch (e) {
+    if (e.response && e.response.data && e.response.data.error) {
+      sendResponse(res, new Error(e.response.data.error));
+    } else {
+      sendResponse(res, e);
+    }
+  }
+});
+
+app.post('/claim', async (req, res) => {
+  const { likerFid, likerAddress } = req.body;
+  try {
+    const results = await Promise.all(signerURLs.map(async (url, i) => {
+      const response = await axios.post(`${url}/api/claim`, {
+        likerFid,
+        likerAddress,
+      }, {
+        headers: { Authorization: `Bearer ${signerTokens[i]}` }
+      });
+      return response.data.result;
+    }));
+    const signatures = results.map(r => r.signature);
+    sendResponse(res, null, {
+      claimArguments: results[0].arguments.concat([signatures]),
     });
   } catch (e) {
     if (e.response && e.response.data && e.response.data.error) {
