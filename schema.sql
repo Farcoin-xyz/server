@@ -32,6 +32,18 @@ CREATE TABLE claim (
   unique key claim_compound_key (liker_fid, nonce)
 );
 
+CREATE TABLE onboard (
+  user_num int not null auto_increment primary key,
+  liker_fid int not null,
+  liked_fid int not null,
+  reward_tokens decimal(13,2) not null,
+  block_timestamp int not null,
+  block_number int not null,
+  transaction_hash varchar(66) not null,
+
+  index onboarder (liker_fid)
+);
+
 CREATE TABLE log_scan (
   id int not null auto_increment primary key,
   log_type varchar(10) not null unique,
